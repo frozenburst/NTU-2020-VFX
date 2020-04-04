@@ -7,7 +7,7 @@ import os.path as op
 import matplotlib.pyplot as plt
 import numpy as np
 
-data_pth = op.join("images", "test")
+data_pth = op.join("images", "test2")
 img_set = []
 offset_sets = []
 
@@ -18,7 +18,7 @@ def imshow(img, cmap=None):
 def collect_image():
     print("Collecting Image with in path:", data_pth)
     img_set.clear()
-    for img_pth in sorted(Path(data_pth).glob(f'*.JPG')):
+    for img_pth in sorted(Path(data_pth).glob(f'IMG*.JPG')):
         print(img_pth)
         img = cv2.imread(op.join(img_pth))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
