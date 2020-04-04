@@ -1,7 +1,7 @@
 # VFX gitignore
 
-# temperate files
-.ipynb_checkpoints/
+# Jupyter Notebook
+.ipynb_checkpoints
 
 # data
-hw1_HDR/images/*
+**/images
