@@ -69,7 +69,8 @@ if __name__ == "__main__":
     # Alignment: Median Threshold Bitmap
     # Take first image as base to alignment
     img_name = op.join(data_pth, f'00.JPG')
-    cv2.imwrite(img_name, img_set[0])
+    base_img_bgr =  cv2.cvtColor(img_set[0], cv2.COLOR_RGB2BGR)
+    cv2.imwrite(img_name, base_img_bgr)
     print("Base images:", img_name)
 
     img_set_copy = img_set.copy()
@@ -98,5 +99,6 @@ if __name__ == "__main__":
         offset = pyramid_compare(tmp_img_gray, 0)
         img_shifted = img_shift(tmp_img, offset[0], offset[1])
         img_name = op.join(data_pth, f'0{img_index+1}.JPG')
-        cv2.imwrite(img_name, img_shifted)
+        img_shifted_bgr = cv2.cvtColor(img_shifted, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(img_name, img_shifted_bgr)
         print(offset, img_name)
