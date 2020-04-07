@@ -54,6 +54,16 @@ def random_sample(img_set, num_pixels):
 
     return sampled_pixels, coords
 
+def downsampling(img_set, size, interpolation=cv2.INTER_LINEAR):
+    channels = img_set.shape[3]
+    sampled_pixels = []
+    for img in img_set:
+        ds_img = cv2.resize(img, size, interpolation=interpolation)
+        ds_vec = np.moveaxis(np.reshape(ds_img, (-1, channels, 1)), 1, 0)
+        sampled_pixels = np.concatenate(sampled_pixels, ds_vec)
+    
+    return sampled_pixels
+
 def gsolve(Z, B, l, w):
     '''
     Assumes:
@@ -116,13 +126,15 @@ def gsolve(Z, B, l, w):
 
     return np.reshape(g, (channels, n))
 
-def Debevec_HDR(Z, B, P):
+def Debevec_HDR(Z, B, P, l = 30, w=None):
 
     '''
     Arguments:
         Z(j, x, y, c): j images
         B(j): exposure of image j
         P(i, c): i sampled pixels
+        l: lambda, weighting regression term
+        w(z): weighting function
 
     Returns:
         lE(c, x, y): radiance map of channel c
@@ -137,13 +149,14 @@ def Debevec_HDR(Z, B, P):
     lB = np.log(B)
 
     # hat weighting function
-    Zmin = 0
-    Zmax = 255
-    Zmed = (Zmin + Zmax)/2
-    w = np.array([z-Zmin if z <= Zmed else Zmax-z for z in range(256)])/int(Zmed)
+    if w is None:
+        Zmin = 0
+        Zmax = 255
+        Zmed = (Zmin + Zmax)/2
+        w = np.array([z-Zmin if z <= Zmed else Zmax-z for z in range(256)])/int(Zmed)
 
     # get function g
-    g = gsolve(sampled_pixels, lB, 30, w)
+    g = gsolve(sampled_pixels, lB, l, w)
 
     '''
     # move axis version
@@ -160,15 +173,27 @@ def Debevec_HDR(Z, B, P):
         for x in range(height):
             for y in range(width):
                 wij = w[Z[:, x, y, c]]
-                if(np.sum(wij) == 0):
-                    print(Z[:, x, y, c])
-                lE[c, x, y] = np.sum(wij * (g[c, Z[:, x, y, c]] - B)) / np.sum(wij)
+                swij = np.sum(wij)
+                # check for overflow
+                if swij == 0:
+                    if np.all(Z[:, x, y, c] == 255):
+                        lE[c, x, y] = np.inf
+                    elif np.all(Z[:, x, y, c] == 0):
+                        lE[c, x, y] = -np.inf
+                    print(x, y, Z[:, x, y, c])
+                else:
+                    lE[c, x, y] = np.sum(wij * (g[c, Z[:, x, y, c]] - B)) / swij
             
             # display progress
             new_prog = '{}%'.format(int((c*height + x)/(channels*height) * 100))
             if new_prog != progress:
                 progress = new_prog
                 print(progress)
+
+    # clip fix overflow
+    for c in range(channels):
+        lE[c, lE[c] == np.inf] = np.max(lE[c, lE[c] != np.inf])
+        lE[c, lE[c] == -np.inf] = np.min(lE[c, lE[c] != -np.inf])
 
     return lE, g
 
@@ -181,34 +206,43 @@ if __name__ == "__main__":
     img_set, exposure_time = load_data(data_path, img_type)
 
     # sample pixels
-    num_pixels = 50
-    sampled_pixels, sampled_coords = random_sample(img_set, num_pixels)
+    sample_method = 'random_sample'
+    if sample_method == 'random_sample':
+        # random sample
+        num_pixels = 50
+        sampled_pixels, sampled_coords = random_sample(img_set, num_pixels)
+    elif sample_method == 'downsampling':
+        # downsampling
+        sampled_pixels = downsampling(img_set, (10, 10))
+    # check if the number of pixels is enough to recover the response curve 
+    if sampled_pixels.shape[1] * (len(img_set)-1) < 256:
+        print('The number of pixels is not enough!')
 
     # Debevec's method
     HDR_img, g = Debevec_HDR(img_set, exposure_time, sampled_pixels)
 
+    # save raw data
+    np.save(op.join(data_path, 'radiance_map'), HDR_img)
     # save image
-    plt.imshow(HDR_img[0])
-    plt.savefig(op.join(data_path, 'hdr_r.png'))
-    plt.clf()
-    plt.imshow(HDR_img[1])
-    plt.savefig(op.join(data_path, 'hdr_g.png'))
-    plt.clf()
-    plt.imshow(HDR_img[2])
-    plt.savefig(op.join(data_path, 'hdr_b.png'))
+    RGB = 'rgb'
+    for i in range(3):
+        plt.clf()
+        plt.imshow(HDR_img[i], 'rainbow')
+        plt.colorbar()
+        plt.savefig(op.join(data_path, 'hdr_{}.png'.format(RGB[i])))
 
     # save response curve
     plt.clf()
     y_range = np.arange(256)
-    plt.plot(g[0], y_range, color='r')
-    plt.plot(g[1], y_range, color='g')
-    plt.plot(g[2], y_range, color='b')
+    for i in range(3):
+        plt.plot(g[i], y_range, color=RGB[i])
     plt.xlabel('log exposure X')
     plt.ylabel('pixel value Z')
     plt.savefig(op.join(data_path, 'response_curve.png'))
 
     # save sampled pixel
-    plt.clf()
-    plt.plot(sampled_coords[:, 1], sampled_coords[:, 0], 'ro')
-    plt.imshow(img_set[-1], None)
-    plt.savefig(op.join(data_path, 'sampled_pixel.png'))
+    if sample_method == 'random_sample':
+        plt.clf()
+        plt.plot(sampled_coords[:, 1], sampled_coords[:, 0], 'ro')
+        plt.imshow(img_set[-1], None)
+        plt.savefig(op.join(data_path, 'sampled_pixel.png'))
