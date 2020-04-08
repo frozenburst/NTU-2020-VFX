@@ -204,7 +204,7 @@ def Debevec_HDR(Z, B, P, l = 30, w=None):
 
 if __name__ == "__main__":
     # dataset
-    data_path = op.join('.', 'images', 'test2')
+    data_path = op.join('.', 'images', 'nightsight')
     img_type = '.JPG'
     # load data
     img_set, exposure_time = load_data(data_path, img_type)
@@ -225,24 +225,19 @@ if __name__ == "__main__":
     # Debevec's method
     HDR_img, response = Debevec_HDR(img_set, exposure_time, sampled_pixels)
     print(HDR_img.shape)
-    # normalize
-    HDR_img -= np.min(HDR_img)
-    HDR_img = HDR_img / np.max(HDR_img)
-    # save raw data
+
+    # save HDR image
     cv2.imwrite(op.join(data_path, 'radiance_map.hdr'), HDR_img)
 
-    # save image
-    # quantize
-    HDR_img *= 255
-    HDR_img = HDR_img.astype(np.uint8)
+    # heatmap of gray scale log space
     plt.clf()
-    cv2.imwrite('HDR.png', HDR_img)
-    # to gray scale
-    HDR_gray = cv2.cvtColor(HDR_img, cv2.COLOR_RGB2GRAY)
-    plt.clf()
-    plt.imshow(HDR_gray, 'rainbow')
+    HDR_gray = np.sum(HDR_img, axis=2)/3
+    plt.imshow(np.log(HDR_gray), 'rainbow')
     plt.colorbar()
-    plt.savefig(op.join(data_path, 'HDR_heatmap.png'))
+    plt.savefig(op.join(data_path, 'log_exposure.png'))
+
+    # save HDR image
+    cv2.imwrite(op.join(data_path, 'radiance_map.hdr'), HDR_img)
 
     # save response curve
     plt.clf()
@@ -260,3 +255,27 @@ if __name__ == "__main__":
         plt.plot(sampled_coords[:, 1], sampled_coords[:, 0], 'ro')
         plt.imshow(img_set[-1], None)
         plt.savefig(op.join(data_path, 'sampled_pixel.png'))
+
+    # Tone Mapping
+    HDR_f32 = HDR_img.astype(np.float32)
+    
+    tonemap = cv2.createTonemap(2.2)
+    ldr = tonemap.process(HDR_f32)
+    ldr = cv2.cvtColor(ldr, cv2.COLOR_RGB2BGR)
+    cv2.imwrite(op.join(data_path, 'ldr.png'), ldr*255) 
+    # drago
+    tonemap = cv2.createTonemapDrago(2.2)
+    ldr = tonemap.process(HDR_f32)
+    ldr = cv2.cvtColor(ldr, cv2.COLOR_RGB2BGR)
+    cv2.imwrite(op.join(data_path, 'ldr_drago.png'), ldr*255)
+    # mantiuk
+    tonemap = cv2.createTonemapMantiuk(2.2)
+    ldr = tonemap.process(HDR_f32)
+    ldr = cv2.cvtColor(ldr, cv2.COLOR_RGB2BGR)
+    cv2.imwrite(op.join(data_path, 'ldr_mantiuk.png'), ldr*255)
+    # reinhard
+    tonemap = cv2.createTonemapReinhard(2.2)
+    ldr = tonemap.process(HDR_f32)
+    ldr = cv2.cvtColor(ldr, cv2.COLOR_RGB2BGR)
+    cv2.imwrite(op.join(data_path, 'ldr_reinhard.png'), ldr*255)
+
