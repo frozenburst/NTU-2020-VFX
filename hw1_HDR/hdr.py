@@ -195,12 +195,16 @@ def Debevec_HDR(Z, B, P, l = 30, w=None):
         lE[c, lE[c] == np.inf] = np.max(lE[c, lE[c] != np.inf])
         lE[c, lE[c] == -np.inf] = np.min(lE[c, lE[c] != -np.inf])
 
+    # change from color major to row major
+    lE = np.moveaxis(lE, 0, -1)
+    lE = np.exp(lE)
+
     return lE, g
 
 
 if __name__ == "__main__":
     # dataset
-    data_path = op.join('.', 'images', 'long_expo2')
+    data_path = op.join('.', 'images', 'test2')
     img_type = '.JPG'
     # load data
     img_set, exposure_time = load_data(data_path, img_type)
@@ -219,23 +223,33 @@ if __name__ == "__main__":
         print('The number of pixels is not enough!')
 
     # Debevec's method
-    HDR_img, g = Debevec_HDR(img_set, exposure_time, sampled_pixels)
-
+    HDR_img, response = Debevec_HDR(img_set, exposure_time, sampled_pixels)
+    print(HDR_img.shape)
+    # normalize
+    HDR_img -= np.min(HDR_img)
+    HDR_img = HDR_img / np.max(HDR_img)
     # save raw data
-    np.save(op.join(data_path, 'radiance_map'), HDR_img)
+    cv2.imwrite(op.join(data_path, 'radiance_map.hdr'), HDR_img)
+
     # save image
-    RGB = 'rgb'
-    for i in range(3):
-        plt.clf()
-        plt.imshow(HDR_img[i], 'rainbow')
-        plt.colorbar()
-        plt.savefig(op.join(data_path, 'hdr_{}.png'.format(RGB[i])))
+    # quantize
+    HDR_img *= 255
+    HDR_img = HDR_img.astype(np.uint8)
+    plt.clf()
+    cv2.imwrite('HDR.png', HDR_img)
+    # to gray scale
+    HDR_gray = cv2.cvtColor(HDR_img, cv2.COLOR_RGB2GRAY)
+    plt.clf()
+    plt.imshow(HDR_gray, 'rainbow')
+    plt.colorbar()
+    plt.savefig(op.join(data_path, 'HDR_heatmap.png'))
 
     # save response curve
     plt.clf()
     y_range = np.arange(256)
+    RGB = 'rgb'
     for i in range(3):
-        plt.plot(g[i], y_range, color=RGB[i])
+        plt.plot(response[i], y_range, color=RGB[i])
     plt.xlabel('log exposure X')
     plt.ylabel('pixel value Z')
     plt.savefig(op.join(data_path, 'response_curve.png'))
