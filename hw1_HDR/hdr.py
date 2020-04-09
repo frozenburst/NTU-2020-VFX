@@ -60,7 +60,10 @@ def downsampling(img_set, size, interpolation=cv2.INTER_LINEAR):
     for img in img_set:
         ds_img = cv2.resize(img, size, interpolation=interpolation)
         ds_vec = np.moveaxis(np.reshape(ds_img, (-1, channels, 1)), 1, 0)
-        sampled_pixels = np.concatenate(sampled_pixels, ds_vec)
+        if len(sampled_pixels) > 0:
+            sampled_pixels = np.concatenate((sampled_pixels, ds_vec), axis=2)
+        else:
+            sampled_pixels = ds_vec
     
     return sampled_pixels
 
@@ -180,7 +183,7 @@ def Debevec_HDR(Z, B, P, l = 30, w=None):
                         lE[c, x, y] = np.inf
                     elif np.all(Z[:, x, y, c] == 0):
                         lE[c, x, y] = -np.inf
-                    print(x, y, Z[:, x, y, c])
+                    #print(x, y, Z[:, x, y, c])
                 else:
                     lE[c, x, y] = np.sum(wij * (g[c, Z[:, x, y, c]] - B)) / swij
             
@@ -210,7 +213,7 @@ if __name__ == "__main__":
     img_set, exposure_time = load_data(data_path, img_type)
 
     # sample pixels
-    sample_method = 'random_sample'
+    sample_method = 'downsampling'
     if sample_method == 'random_sample':
         # random sample
         num_pixels = 50
@@ -222,22 +225,26 @@ if __name__ == "__main__":
     if sampled_pixels.shape[1] * (len(img_set)-1) < 256:
         print('The number of pixels is not enough!')
 
-    # Debevec's method
+    # HDR: Debevec's method
     HDR_img, response = Debevec_HDR(img_set, exposure_time, sampled_pixels)
     print(HDR_img.shape)
 
     # save HDR image
-    cv2.imwrite(op.join(data_path, 'radiance_map.hdr'), HDR_img)
+    # convert to float32
+    HDR_f32 = HDR_img.astype(np.float32)
+    HDR_BGR = HDR_f32.copy()
+    # convert to BGR
+    HDR_BGR = HDR_BGR[:, :, ::-1]
+    print(HDR_f32[0, 0])
+    print(HDR_BGR[0, 0])
+    cv2.imwrite(op.join(data_path, 'radiance_map.hdr'), HDR_BGR)
 
     # heatmap of gray scale log space
     plt.clf()
-    HDR_gray = np.sum(HDR_img, axis=2)/3
+    HDR_gray = np.sum(HDR_f32, axis=2)/3
     plt.imshow(np.log(HDR_gray), 'rainbow')
     plt.colorbar()
     plt.savefig(op.join(data_path, 'log_exposure.png'))
-
-    # save HDR image
-    cv2.imwrite(op.join(data_path, 'radiance_map.hdr'), HDR_img)
 
     # save response curve
     plt.clf()
@@ -253,29 +260,23 @@ if __name__ == "__main__":
     if sample_method == 'random_sample':
         plt.clf()
         plt.plot(sampled_coords[:, 1], sampled_coords[:, 0], 'ro')
-        plt.imshow(img_set[-1], None)
+        plt.imshow(np.mean(img_set, axis=0).astype(np.uint8), None)
         plt.savefig(op.join(data_path, 'sampled_pixel.png'))
 
     # Tone Mapping
-    HDR_f32 = HDR_img.astype(np.float32)
-    
     tonemap = cv2.createTonemap(2.2)
-    ldr = tonemap.process(HDR_f32)
-    ldr = cv2.cvtColor(ldr, cv2.COLOR_RGB2BGR)
-    cv2.imwrite(op.join(data_path, 'ldr.png'), ldr*255) 
+    ldr = tonemap.process(HDR_BGR)
+    cv2.imwrite(op.join(data_path, 'tone_mapping', 'ldr.png'), ldr*255) 
     # drago
     tonemap = cv2.createTonemapDrago(2.2)
-    ldr = tonemap.process(HDR_f32)
-    ldr = cv2.cvtColor(ldr, cv2.COLOR_RGB2BGR)
-    cv2.imwrite(op.join(data_path, 'ldr_drago.png'), ldr*255)
+    ldr = tonemap.process(HDR_BGR)
+    cv2.imwrite(op.join(data_path, 'tone_mapping', 'ldr_drago.png'), ldr*255)
     # mantiuk
     tonemap = cv2.createTonemapMantiuk(2.2)
-    ldr = tonemap.process(HDR_f32)
-    ldr = cv2.cvtColor(ldr, cv2.COLOR_RGB2BGR)
-    cv2.imwrite(op.join(data_path, 'ldr_mantiuk.png'), ldr*255)
+    ldr = tonemap.process(HDR_BGR)
+    cv2.imwrite(op.join(data_path, 'tone_mapping', 'ldr_mantiuk.png'), ldr*255)
     # reinhard
     tonemap = cv2.createTonemapReinhard(2.2)
-    ldr = tonemap.process(HDR_f32)
-    ldr = cv2.cvtColor(ldr, cv2.COLOR_RGB2BGR)
-    cv2.imwrite(op.join(data_path, 'ldr_reinhard.png'), ldr*255)
+    ldr = tonemap.process(HDR_BGR)
+    cv2.imwrite(op.join(data_path, 'tone_mapping', 'ldr_reinhard.png'), ldr*255)
 
