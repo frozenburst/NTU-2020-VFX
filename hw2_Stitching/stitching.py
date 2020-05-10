@@ -54,7 +54,7 @@ def warp_cylindrical_coordinate(img, f):
     # 5~-5 is to cancel the black boader, however, it should be calculate precisely by f and x above
     # Here is for convinent
     img_t = cy_img[:, 5:-5, :]
-    img_t = cv.copyMakeBorder(img_t, 60, 0, 0, 0, cv.BORDER_CONSTANT, value=[0, 0, 0])
+    img_t = cv.copyMakeBorder(img_t, 0, 0, 0, 0, cv.BORDER_CONSTANT, value=[0, 0, 0])
     return cy_img
 
 
@@ -158,29 +158,52 @@ def image_concatenate(img1, img2, global_translate, shifted_y=0):
                 else:
                     img_cat[y][x] = img_t1[y][x-shifted_x]
     else:
-        shifted_x = img_t1.shape[0] - (img_t2.shape[0] - abs(round(global_translate[0])))
-        img_t1 = np.copy(img_t1[:, :shifted_x, :])
-        # increase with more than one image
+        shifted_x = abs(round(global_translate[0]))
         shifted_y = round(global_translate[1]) + shifted_y
         M = np.float32([[1, 0, 0], [0, 1, shifted_y]])
-        shifted_img_t2 = cv.warpAffine(img_t2, M, (img_t2.shape[1], img_t2.shape[0]))
-        img_cat = np.concatenate((img_t1, shifted_img_t2), axis=1)
+        img_t2 = cv.warpAffine(img_t2, M, (img_t2.shape[1], img_t2.shape[0]))
+        img_cat = cv.copyMakeBorder(img_t1, 0, 0, 0, shifted_x, cv.BORDER_CONSTANT, value=[0, 0, 0])
+        middle_length = img_t2.shape[1] - shifted_x
+        print(img_t1.shape, img_t2.shape, img_cat.shape, shifted_x)
+        print(middle_length)
+        # Blending with alpha ratio
+        for y in range(img_cat.shape[0]):
+            for x in range(img_cat.shape[1]):
+                if x < img_t1.shape[1] - middle_length:
+                    img_cat[y][x] = img_t1[y][x]
+                elif x >= img_t1.shape[1] - middle_length and x < img_t1.shape[1]:
+                    ratio = (x - (img_t1.shape[1] - middle_length)) / middle_length
+                    # closer -> heavier
+                    img_cat[y][x] = ratio * img_t2[y][x-(img_t1.shape[1] - middle_length)] + (1 - ratio) * img_t1[y][x]
+                else:
+                    img_cat[y][x] = img_t2[y][x-(img_t1.shape[1] - middle_length)]
     #imshow(img_cat)
     return img_cat, shifted_y
 
 
-def horizontal_fix(img_cat):
+def horizontal_fix(img_cat, shifted_y=0):
     # Make sure the whole stitching image is horizontal. (Fix delta y.)
     img_cat_y_fix = np.copy(img_cat)
-    for x in range(img_cat.shape[1]-245):
-        ratio = 1 - (x / (img_cat.shape[1]-245))
-        y_offset = abs(round(ratio * shifted_y))
-        for y in range(img_cat.shape[0]):
-            #if y > img_cat.shape[0] - y_offset: break
-            if y < y_offset:
-                img_cat_y_fix[y][x] = [0, 0, 0]
-            elif y >= y_offset:
-                img_cat_y_fix[y][x] = img_cat[y-y_offset][x]
+    if shifted_y < 0:
+        for x in range(img_cat.shape[1]-245):
+            ratio = 1 - (x / (img_cat.shape[1]-245))
+            y_offset = abs(round(ratio * shifted_y))
+            for y in range(img_cat.shape[0]):
+                #if y > img_cat.shape[0] - y_offset: break
+                if y < y_offset:
+                    img_cat_y_fix[y][x] = [0, 0, 0]
+                elif y >= y_offset:
+                    img_cat_y_fix[y][x] = img_cat[y-y_offset][x]
+    else:
+        for x in range(img_cat.shape[1]):
+            ratio = x / img_cat.shape[1]
+            y_offset = abs(round(ratio * shifted_y))
+            for y in range(img_cat.shape[0]):
+                #if y > img_cat.shape[0] - y_offset: break
+                if y < img_cat.shape[0] - y_offset:
+                    img_cat_y_fix[y][x] = img_cat[y+y_offset][x]
+                else:
+                    img_cat_y_fix[y][x] = [0, 0, 0]
     #imshow(img_cat_y_fix)
     return img_cat_y_fix
 
@@ -193,7 +216,7 @@ def warp_to_rectangle(img):
 
 if __name__ == "__main__":
     # Collect the images to stitch
-    data_pth = op.join("images", "parrington")
+    data_pth = op.join("images", "lab1")
     img_set = collect_images(data_pth)
     # Collect the focal of image in order 0~N
     focal_filename = "focal.txt"
@@ -216,5 +239,5 @@ if __name__ == "__main__":
             shifted_y = 0
         img_cat, shifted_y = image_concatenate(img_cat, img_compared, global_translate, shifted_y)
     
-    img_cat_y_fix = horizontal_fix(img_cat)
+    img_cat_y_fix = horizontal_fix(img_cat, shifted_y)
     imsave(img_cat_y_fix, "pano_test", "jpg")
