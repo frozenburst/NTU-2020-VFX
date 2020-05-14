@@ -7,6 +7,8 @@ import numpy as np
 import math
 import pdb
 
+import feature_detection
+
 
 def imshow(img, cmap=None):
     plt.imshow(img, cmap)
@@ -54,12 +56,12 @@ def warp_cylindrical_coordinate(img, f):
     # 5~-5 is to cancel the black boader, however, it should be calculate precisely by f and x above
     # Here is for convinent
     img_t = cy_img[:, 5:-5, :]
-    img_t = cv.copyMakeBorder(img_t, 0, 0, 0, 0, cv.BORDER_CONSTANT, value=[0, 0, 0])
+    img_t = cv.copyMakeBorder(img_t, 60, 0, 0, 0, cv.BORDER_CONSTANT, value=[0, 0, 0])
     return cy_img
 
 
 def feature_extraction(img):
-    # Find out the feature points in our images. (harris corner)
+    '''
     # feature extraction with library SIFT
     # Initiate SIFT detector
     sift = cv.xfeatures2d.SIFT_create()
@@ -67,6 +69,16 @@ def feature_extraction(img):
     # find the keypoints and descriptors with SIFT
     kp1, des1 = sift.detectAndCompute(img,None)
     return kp1, des1
+    '''
+    img_gray = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
+    img_gray = np.array(img_gray)
+    # Harris corner detector
+    key_points, local_maxima = feature_detection.HarrisCornerDetector(img_gray)
+
+    # MSOP descriptor
+    key_points, descriptors = feature_detection.MSOPDescriptor(img_gray, key_points)
+
+    return key_points, descriptors
 
 
 def feature_matching(img1, img2, kp1, kp2, des1, de2):
@@ -80,11 +92,11 @@ def feature_matching(img1, img2, kp1, kp2, des1, de2):
     for i, des in enumerate(des1):
         candidate_pt = []
         # Ignore the boarder
-        if kp1[i].pt[0] < 10 or kp1[i].pt[0] > img1.shape[1] - 10 or kp1[i].pt[1] < 10 or kp1[i].pt[1] > img1.shape[0] - 10:
+        if kp1[i][0] < 10 or kp1[i][0] > img1.shape[1] - 10 or kp1[i][1] < 10 or kp1[i][1] > img1.shape[0] - 10:
             continue
         for j, des_compare in enumerate(des2):
             # Ignore the boarder
-            if kp2[j].pt[0] < 10 or kp2[j].pt[0] > img2.shape[1] - 10 or kp2[j].pt[1] < 10 or kp2[j].pt[1] > img2.shape[0] - 10:
+            if kp2[j][0] < 10 or kp2[j][0] > img2.shape[1] - 10 or kp2[j][1] < 10 or kp2[j][1] > img2.shape[0] - 10:
                 continue
             if sum(abs(des-des_compare)) < compared_threshold:
                 candidate_pt.append([kp1[i], kp2[j], sum(abs(des-des_compare))])
@@ -102,29 +114,29 @@ def feature_matching(img1, img2, kp1, kp2, des1, de2):
     candidate_index = -1
     for i, (kp_1, kp_2) in enumerate(kp_candidate):
         #print(kp_1.pt, kp_2.pt)
-        x_translate = kp_1.pt[0] - kp_2.pt[0]
-        y_translate = kp_1.pt[1] - kp_2.pt[1]
+        x_translate = kp_1[0] - kp_2[0]
+        y_translate = kp_1[1] - kp_2[1]
         #print(x_translate, y_translate)
         approve_vote = 0
         for kp_1_tmp, kp_2_tmp in kp_candidate:
-            kp2_2_kp1 = (kp_2_tmp.pt[0] + x_translate, kp_2_tmp.pt[1] + y_translate)
-            if distance(kp_1_tmp.pt, kp2_2_kp1) < 5:
+            kp2_2_kp1 = (kp_2_tmp[0] + x_translate, kp_2_tmp[1] + y_translate)
+            if distance(kp_1_tmp, kp2_2_kp1) < 5:
                 approve_vote += 1
         if max_approve_vote < approve_vote:
             max_approve_vote = approve_vote
             candidate_index = i
     ransac_pt_list = []
     kp_1, kp_2 = kp_candidate[candidate_index]
-    x_translate = kp_1.pt[0] - kp_2.pt[0]
-    y_translate = kp_1.pt[1] - kp_2.pt[1]
+    x_translate = kp_1[0] - kp_2[0]
+    y_translate = kp_1[1] - kp_2[1]
     img1_ft = np.copy(img1)
     img2_ft = np.copy(img2)
     for kp_1_tmp, kp_2_tmp in kp_candidate:
-        kp2_2_kp1 = (kp_2_tmp.pt[0] + x_translate, kp_2_tmp.pt[1] + y_translate)
-        if distance(kp_1_tmp.pt, kp2_2_kp1) < 5:
+        kp2_2_kp1 = (kp_2_tmp[0] + x_translate, kp_2_tmp[1] + y_translate)
+        if distance(kp_1_tmp, kp2_2_kp1) < 5:
             ransac_pt_list.append([kp_1_tmp, kp_2_tmp])
-            cv.circle(img1_ft, (round(kp_1_tmp.pt[0]), round(kp_1_tmp.pt[1])), 5, (255, 0, 0), -1)
-            cv.circle(img2_ft, (round(kp_2_tmp.pt[0]), round(kp_2_tmp.pt[1])), 5, (255, 0, 0), -1)
+            cv.circle(img1_ft, (int(round(kp_1_tmp[0])), int(round(kp_1_tmp[1]))), 2, (255, 0, 0), -1)
+            cv.circle(img2_ft, (int(round(kp_2_tmp[0])), int(round(kp_2_tmp[1]))), 2, (255, 0, 0), -1)
     #imshow(img1_ft)
     #imshow(img2_ft)
     print(len(ransac_pt_list))
@@ -137,9 +149,11 @@ def image_concatenate(img1, img2, global_translate, shifted_y=0):
     #imshow(img_t1)
     #imshow(img_t2)
     print(global_translate, round(global_translate[0]), round(global_translate[1]))
+
+    shifted_x = int(abs(round(global_translate[0])))
+    shifted_y = int(round(global_translate[1]) + shifted_y)
+
     if round(global_translate[0]) < 0:
-        shifted_x = abs(round(global_translate[0]))
-        shifted_y = round(global_translate[1]) + shifted_y
         M = np.float32([[1, 0, 0], [0, 1, shifted_y]])
         img_t2 = cv.warpAffine(img_t2, M, (img_t2.shape[1], img_t2.shape[0]))
         img_cat = cv.copyMakeBorder(img_t1, 0, 0, shifted_x, 0, cv.BORDER_CONSTANT, value=[0, 0, 0])
@@ -158,8 +172,6 @@ def image_concatenate(img1, img2, global_translate, shifted_y=0):
                 else:
                     img_cat[y][x] = img_t1[y][x-shifted_x]
     else:
-        shifted_x = abs(round(global_translate[0]))
-        shifted_y = round(global_translate[1]) + shifted_y
         M = np.float32([[1, 0, 0], [0, 1, shifted_y]])
         img_t2 = cv.warpAffine(img_t2, M, (img_t2.shape[1], img_t2.shape[0]))
         img_cat = cv.copyMakeBorder(img_t1, 0, 0, 0, shifted_x, cv.BORDER_CONSTANT, value=[0, 0, 0])
@@ -216,7 +228,7 @@ def warp_to_rectangle(img):
 
 if __name__ == "__main__":
     # Collect the images to stitch
-    data_pth = op.join("images", "lab1")
+    data_pth = op.join("images", "parrington")
     img_set = collect_images(data_pth)
     # Collect the focal of image in order 0~N
     focal_filename = "focal.txt"
@@ -233,6 +245,11 @@ if __name__ == "__main__":
         img_compared = cy_img_set[i+1]
         kp1, des1 = feature_extraction(img)
         kp2, des2 = feature_extraction(img_compared)
+
+        # Swap x, y for different design; SIFT is (x, y) but in harris is (y, x)
+        kp1[:, [0, 1]] = kp1[:, [1, 0]]
+        kp2[:, [0, 1]] = kp2[:, [1, 0]]
+
         global_translate = feature_matching(img, img_compared, kp1, kp2, des1, des2)
         if i == 0:
             img_cat = img
