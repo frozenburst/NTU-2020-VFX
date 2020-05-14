@@ -7,7 +7,7 @@ import os.path as op
 import matplotlib.pyplot as plt
 import numpy as np
 
-data_pth = op.join("images", "test2")
+data_pth = op.join("images", "nightsight")
 img_set = []
 offset_sets = []
 
