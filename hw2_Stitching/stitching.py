@@ -5,7 +5,7 @@ import os.path as op
 import matplotlib.pyplot as plt
 import numpy as np
 import math
-import pdb
+from tqdm import tqdm
 
 import feature_detection
 
@@ -24,7 +24,7 @@ def collect_images(pth):
     # In cv2, is BGR instead of RGB
     img_set = []
     img_set.clear()
-    for img_pth in sorted(Path(pth).glob(f'prtn*.jpg')):
+    for img_pth in sorted(Path(pth).glob(f't*.JPG')):
         print(img_pth)
         img = cv.imread(op.join(img_pth))
         img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
@@ -45,19 +45,31 @@ def collect_focal(pth, filename):
 
 def warp_cylindrical_coordinate(img, f):
     # Calculate the coordinate from (x, y) to (theta, h)
-    cy_img = np.zeros_like(img)
-    for y in range(img.shape[0]):
-        for x in range(img.shape[1]):
-            y_tmp = y - img.shape[0] / 2
-            x_tmp = x - img.shape[1] / 2
-            y_p = int(round(f * y_tmp / math.sqrt(x_tmp**2 + f**2)) + img.shape[0] / 2)
-            x_p = int(round(f * math.atan(x_tmp/f)) + img.shape[1] / 2)
-            cy_img[y_p][x_p] = img[y][x]
-    # 5~-5 is to cancel the black boader, however, it should be calculate precisely by f and x above
+    if f > 0:
+        cy_img = np.zeros_like(img)
+        for y in range(img.shape[0]):
+            for x in range(img.shape[1]):
+                y_tmp = int(y - img.shape[0] / 2)
+                x_tmp = int(x - img.shape[1] / 2)
+                y_p = int(round(f * y_tmp / math.sqrt(x_tmp**2 + f**2)) + img.shape[0] / 2)
+                x_p = int(round(f * math.atan(x_tmp/f)) + img.shape[1] / 2)
+                cy_img[y_p][x_p] = img[y][x]
+    else:
+        cy_img = np.copy(img)
+    # x~-x is to cancel the black boader, however, it should be calculate precisely by f and x above
     # Here is for convinent
-    img_t = cy_img[:, 5:-5, :]
-    img_t = cv.copyMakeBorder(img_t, 60, 0, 0, 0, cv.BORDER_CONSTANT, value=[0, 0, 0])
-    return cy_img
+    tmp_y = int(round(cy_img.shape[0] / 2))
+    for x in range(cy_img.shape[1]):
+        if cy_img[tmp_y][x][0] == 0.0:
+            continue
+        else:
+            tmp_x = x
+            break
+    img_t = cy_img[:, tmp_x:-tmp_x, :]
+    black_boader = int(round(img_t.shape[0] / 10))
+    img_t = cv.copyMakeBorder(img_t, black_boader, black_boader, 0, 0, cv.BORDER_CONSTANT, value=[0, 0, 0])
+    #imshow(img_t)
+    return img_t
 
 
 def feature_extraction(img):
@@ -149,11 +161,9 @@ def image_concatenate(img1, img2, global_translate, shifted_y=0):
     #imshow(img_t1)
     #imshow(img_t2)
     print(global_translate, round(global_translate[0]), round(global_translate[1]))
-
-    shifted_x = int(abs(round(global_translate[0])))
-    shifted_y = int(round(global_translate[1]) + shifted_y)
-
     if round(global_translate[0]) < 0:
+        shifted_x = int(abs(round(global_translate[0])))
+        shifted_y = int(round(global_translate[1]) + shifted_y)
         M = np.float32([[1, 0, 0], [0, 1, shifted_y]])
         img_t2 = cv.warpAffine(img_t2, M, (img_t2.shape[1], img_t2.shape[0]))
         img_cat = cv.copyMakeBorder(img_t1, 0, 0, shifted_x, 0, cv.BORDER_CONSTANT, value=[0, 0, 0])
@@ -163,21 +173,23 @@ def image_concatenate(img1, img2, global_translate, shifted_y=0):
         # Blending with alpha ratio
         for y in range(img_cat.shape[0]):
             for x in range(img_cat.shape[1]):
-                if x <= shifted_x:
+                if x < shifted_x:
                     img_cat[y][x] = img_t2[y][x]
-                elif x > shifted_x and x < shifted_x + middle_length:
+                elif x >= shifted_x and x < shifted_x + middle_length:
                     ratio = (x - shifted_x) / middle_length
                     # closer -> heavier
                     img_cat[y][x] = ratio * img_t1[y][x-shifted_x] + (1 - ratio) * img_t2[y][x]
                 else:
                     img_cat[y][x] = img_t1[y][x-shifted_x]
     else:
+        shifted_x = int(abs(round(global_translate[0])))
+        shifted_y = int(round(global_translate[1]) + shifted_y)
         M = np.float32([[1, 0, 0], [0, 1, shifted_y]])
         img_t2 = cv.warpAffine(img_t2, M, (img_t2.shape[1], img_t2.shape[0]))
         img_cat = cv.copyMakeBorder(img_t1, 0, 0, 0, shifted_x, cv.BORDER_CONSTANT, value=[0, 0, 0])
         middle_length = img_t2.shape[1] - shifted_x
-        print(img_t1.shape, img_t2.shape, img_cat.shape, shifted_x)
-        print(middle_length)
+        #print(img_t1.shape, img_t2.shape, img_cat.shape, shifted_x)
+        #print(middle_length)
         # Blending with alpha ratio
         for y in range(img_cat.shape[0]):
             for x in range(img_cat.shape[1]):
@@ -196,26 +208,48 @@ def image_concatenate(img1, img2, global_translate, shifted_y=0):
 def horizontal_fix(img_cat, shifted_y=0):
     # Make sure the whole stitching image is horizontal. (Fix delta y.)
     img_cat_y_fix = np.copy(img_cat)
-    if shifted_y < 0:
-        for x in range(img_cat.shape[1]-245):
-            ratio = 1 - (x / (img_cat.shape[1]-245))
-            y_offset = abs(round(ratio * shifted_y))
-            for y in range(img_cat.shape[0]):
-                #if y > img_cat.shape[0] - y_offset: break
-                if y < y_offset:
-                    img_cat_y_fix[y][x] = [0, 0, 0]
-                elif y >= y_offset:
-                    img_cat_y_fix[y][x] = img_cat[y-y_offset][x]
+    if round(global_translate[0]) < 0:
+        if shifted_y < 0:
+            for x in range(img_cat.shape[1]):
+                ratio = 1 - (x / (img_cat.shape[1]))
+                y_offset = abs(round(ratio * shifted_y))
+                for y in range(img_cat.shape[0]):
+                    #if y > img_cat.shape[0] - y_offset: break
+                    if y < y_offset:
+                        img_cat_y_fix[y][x] = [0, 0, 0]
+                    elif y >= y_offset:
+                        img_cat_y_fix[y][x] = img_cat[y-y_offset][x]
+        else:
+            for x in range(img_cat.shape[1]):
+                ratio = x / img_cat.shape[1]
+                y_offset = abs(round(ratio * shifted_y))
+                for y in range(img_cat.shape[0]):
+                    #if y > img_cat.shape[0] - y_offset: break
+                    if y < img_cat.shape[0] - y_offset:
+                        img_cat_y_fix[y][x] = img_cat[y+y_offset][x]
+                    else:
+                        img_cat_y_fix[y][x] = [0, 0, 0]
     else:
-        for x in range(img_cat.shape[1]):
-            ratio = x / img_cat.shape[1]
-            y_offset = abs(round(ratio * shifted_y))
-            for y in range(img_cat.shape[0]):
-                #if y > img_cat.shape[0] - y_offset: break
-                if y < img_cat.shape[0] - y_offset:
-                    img_cat_y_fix[y][x] = img_cat[y+y_offset][x]
-                else:
-                    img_cat_y_fix[y][x] = [0, 0, 0]
+        if shifted_y < 0:
+            for x in range(img_cat.shape[1]):
+                ratio = x / (img_cat.shape[1])
+                y_offset = abs(round(ratio * shifted_y))
+                for y in range(img_cat.shape[0]):
+                    #if y > img_cat.shape[0] - y_offset: break
+                    if y < y_offset:
+                        img_cat_y_fix[y][x] = [0, 0, 0]
+                    elif y >= y_offset:
+                        img_cat_y_fix[y][x] = img_cat[y-y_offset][x]
+        else:
+            for x in range(img_cat.shape[1]):
+                ratio = 1 - (x / (img_cat.shape[1]))
+                y_offset = abs(round(ratio * shifted_y))
+                for y in range(img_cat.shape[0]):
+                    #if y > img_cat.shape[0] - y_offset: break
+                    if y < img_cat.shape[0] - y_offset:
+                        img_cat_y_fix[y][x] = img_cat[y+y_offset][x]
+                    else:
+                        img_cat_y_fix[y][x] = [0, 0, 0]
     #imshow(img_cat_y_fix)
     return img_cat_y_fix
 
@@ -228,7 +262,7 @@ def warp_to_rectangle(img):
 
 if __name__ == "__main__":
     # Collect the images to stitch
-    data_pth = op.join("images", "parrington")
+    data_pth = op.join("images", "inhouse3")
     img_set = collect_images(data_pth)
     # Collect the focal of image in order 0~N
     focal_filename = "focal.txt"
